@@ -9,11 +9,7 @@ const PORT = process.env.PORT || 3001;
 // Middleware - CORS configuration
 const allowedOrigins = [
   'https://parentzone.onrender.com',
-  'http://localhost:3000',
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://127.0.0.1:5500',
-  'http://localhost:5500'
+  'https://parentzone-frontend.onrender.com'
 ];
 
 app.use(cors({
@@ -291,6 +287,171 @@ app.get('/api/device/:deviceId/data', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch device data',
+      details: error.message
+    });
+  }
+});
+
+// ==================== TASK ENDPOINTS ====================
+
+// Get tasks for a device
+app.get('/api/device/:deviceId/tasks', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    console.log(`📋 Fetching tasks for device: ${deviceId}`);
+    
+    const tasksSnapshot = await db.collection('tasks')
+      .where('deviceId', '==', deviceId)
+      .orderBy('createdAt', 'desc')
+      .get();
+    
+    const tasks = [];
+    tasksSnapshot.forEach(doc => {
+      const data = doc.data();
+      tasks.push({
+        id: doc.id,
+        text: data.text,
+        completed: data.completed || false,
+        deviceId: data.deviceId,
+        parentId: data.parentId,
+        createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || new Date().toISOString()
+      });
+    });
+    
+    console.log(`✅ Found ${tasks.length} tasks for device: ${deviceId}`);
+    
+    res.json({
+      success: true,
+      tasks
+    });
+  } catch (error) {
+    console.error('Error fetching tasks:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch tasks',
+      details: error.message
+    });
+  }
+});
+
+// Add a task
+app.post('/api/device/:deviceId/tasks', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const { text, parentId } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({ error: 'Task text is required' });
+    }
+    
+    console.log(`➕ Adding task for device: ${deviceId}`);
+    
+    const taskRef = db.collection('tasks').doc();
+    const taskData = {
+      text,
+      completed: false,
+      deviceId,
+      parentId: parentId || null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    
+    await taskRef.set(taskData);
+    
+    console.log(`✅ Task added: ${taskRef.id}`);
+    
+    res.json({
+      success: true,
+      taskId: taskRef.id,
+      task: {
+        id: taskRef.id,
+        ...taskData,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Error adding task:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to add task',
+      details: error.message
+    });
+  }
+});
+
+// Update a task
+app.put('/api/device/:deviceId/tasks/:taskId', async (req, res) => {
+  try {
+    const { deviceId, taskId } = req.params;
+    const { completed } = req.body;
+    
+    console.log(`✏️ Updating task ${taskId} for device: ${deviceId}`);
+    
+    const taskRef = db.collection('tasks').doc(taskId);
+    const taskDoc = await taskRef.get();
+    
+    if (!taskDoc.exists) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    
+    await taskRef.update({
+      completed,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+    
+    console.log(`✅ Task updated: ${taskId}`);
+    
+    const updatedTask = await taskRef.get();
+    const data = updatedTask.data();
+    
+    res.json({
+      success: true,
+      task: {
+        id: taskId,
+        ...data,
+        createdAt: data.createdAt?.toDate?.()?.toISOString(),
+        updatedAt: data.updatedAt?.toDate?.()?.toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Error updating task:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to update task',
+      details: error.message
+    });
+  }
+});
+
+// Delete a task
+app.delete('/api/device/:deviceId/tasks/:taskId', async (req, res) => {
+  try {
+    const { deviceId, taskId } = req.params;
+    
+    console.log(`🗑️ Deleting task ${taskId} for device: ${deviceId}`);
+    
+    const taskRef = db.collection('tasks').doc(taskId);
+    const taskDoc = await taskRef.get();
+    
+    if (!taskDoc.exists) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    
+    await taskRef.delete();
+    
+    console.log(`✅ Task deleted: ${taskId}`);
+    
+    res.json({
+      success: true,
+      message: 'Task deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting task:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to delete task',
       details: error.message
     });
   }
