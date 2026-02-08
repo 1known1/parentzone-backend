@@ -86,6 +86,20 @@ const loadDevicesFromFirestore = async () => {
   }
 };
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'ParentZone Backend API',
+    status: 'running',
+    endpoints: {
+      health: '/health',
+      testConnection: '/api/test/connection',
+      registerDevice: 'POST /api/devices/register',
+      syncDevice: 'POST /api/device/sync'
+    }
+  });
+});
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
