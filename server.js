@@ -30,9 +30,15 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
     process.exit(1);
   }
 } else {
-  console.error('❌ FIREBASE_SERVICE_ACCOUNT_BASE64 environment variable not set');
-  console.error('💡 Set FIREBASE_SERVICE_ACCOUNT_BASE64 environment variable for production');
-  process.exit(1);
+  // Development: Load from local JSON file
+  try {
+    serviceAccount = require('./parentzone54-firebase-adminsdk-fbsvc-57062aeee3.json');
+    console.log('✅ Firebase credentials loaded from local file (development mode)');
+  } catch (error) {
+    console.error('❌ Failed to load Firebase credentials from local file:', error);
+    console.error('💡 For production, set FIREBASE_SERVICE_ACCOUNT_BASE64 environment variable');
+    process.exit(1);
+  }
 }
 
 admin.initializeApp({
