@@ -165,10 +165,17 @@ app.post('/api/devices/register', async (req, res) => {
     const updateData = {
       fcmToken,
       deviceType,
-      familyId: familyId || existingData.familyId,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
 
+    // Only add familyId if it's provided and not undefined
+    if (familyId !== undefined && familyId !== null) {
+      updateData.familyId = familyId;
+    } else if (existingData.familyId) {
+      updateData.familyId = existingData.familyId;
+    }
+
+    // Only add linkedTo if it exists
     if (existingData.linkedTo) {
       updateData.linkedTo = existingData.linkedTo;
     }
@@ -183,8 +190,8 @@ app.post('/api/devices/register', async (req, res) => {
     devices.set(userId, {
       fcmToken,
       deviceType,
-      familyId: familyId || existingData.familyId || cachedDevice.familyId,
-      linkedTo: existingData.linkedTo || cachedDevice.linkedTo,
+      familyId: updateData.familyId || cachedDevice.familyId,
+      linkedTo: updateData.linkedTo || cachedDevice.linkedTo,
       registeredAt: cachedDevice.registeredAt || new Date().toISOString(),
     });
 
