@@ -260,6 +260,42 @@ app.post('/api/device/sync', async (req, res) => {
   }
 });
 
+// Get device data from Firestore
+app.get('/api/device/:deviceId/data', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    
+    console.log(`📥 Fetching data for device: ${deviceId}`);
+
+    const deviceDoc = await db.collection('devices').doc(deviceId).get();
+
+    if (!deviceDoc.exists) {
+      console.log(`⚠️ Device not found: ${deviceId}`);
+      return res.status(404).json({ 
+        success: false,
+        error: 'Device not found',
+        message: 'No data available for this device yet'
+      });
+    }
+
+    const deviceData = deviceDoc.data();
+    console.log(`✅ Data retrieved for: ${deviceId}`);
+
+    res.json({
+      success: true,
+      data: deviceData,
+      deviceId
+    });
+  } catch (error) {
+    console.error('Error fetching device data:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch device data',
+      details: error.message
+    });
+  }
+});
+
 // Load devices and families from Firestore on startup
 loadDevicesFromFirestore();
 
