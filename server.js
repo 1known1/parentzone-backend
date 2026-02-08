@@ -25,13 +25,17 @@ app.use(cors({
       callback(null, true);
     } else {
       console.log('⚠️ Blocked request from origin:', origin);
-      callback(new Error('Not allowed by CORS'));
+      callback(null, true); // Allow anyway for now to debug
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
+
+// Additional CORS headers for preflight requests
+app.options('*', cors());
+
 app.use(express.json());
 
 // Initialize Firebase Admin
