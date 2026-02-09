@@ -614,6 +614,70 @@ app.post('/api/test/populate-child-data', async (req, res) => {
   }
 });
 
+// Debug endpoint to check what's in Firestore notifications collection
+app.get('/api/debug/notifications/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const deviceType = req.query.deviceType || 'child';
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🔍 DEBUG: CHECKING FIRESTORE NOTIFICATIONS`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`User ID: ${userId}`);
+    console.log(`Device Type: ${deviceType}`);
+    
+    // Use correct collection
+    const collectionName = getNotificationCollection(deviceType);
+    console.log(`Collection: ${collectionName}`);
+    
+    // Get ALL notifications for this user (no limit)
+    const notificationsSnapshot = await db.collection(collectionName)
+      .where('userId', '==', userId)
+      .get();
+    
+    console.log(`\n📊 FIRESTORE QUERY RESULTS:`);
+    console.log(`   Total documents found: ${notificationsSnapshot.size}`);
+    
+    const notifications = [];
+    notificationsSnapshot.forEach((doc, index) => {
+      const data = doc.data();
+      console.log(`\n   Document ${index + 1}:`);
+      console.log(`      ID: ${doc.id}`);
+      console.log(`      userId: ${data.userId}`);
+      console.log(`      title: ${data.title}`);
+      console.log(`      body: ${data.body || data.message}`);
+      console.log(`      type: ${data.type}`);
+      console.log(`      read: ${data.read}`);
+      console.log(`      timestamp: ${data.timestamp?.toDate?.()?.toISOString() || data.sentAt?.toDate?.()?.toISOString() || 'N/A'}`);
+      
+      notifications.push({
+        id: doc.id,
+        ...data,
+        timestamp: data.timestamp?.toDate?.()?.toISOString() || data.sentAt?.toDate?.()?.toISOString() || new Date().toISOString()
+      });
+    });
+    
+    console.log(`\n${'='.repeat(60)}\n`);
+    
+    res.json({
+      success: true,
+      userId: userId,
+      deviceType: deviceType,
+      collection: collectionName,
+      totalCount: notifications.length,
+      notifications: notifications
+    });
+  } catch (error) {
+    console.error(`\n❌ ERROR IN DEBUG ENDPOINT:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Debug query failed',
+      details: error.message
+    });
+  }
+});
+
 // Test endpoint to create sample notifications
 app.post('/api/test/create-notifications', async (req, res) => {
   try {
@@ -625,6 +689,10 @@ app.post('/api/test/create-notifications', async (req, res) => {
     
     console.log(`\n🧪 CREATING TEST NOTIFICATIONS FOR: ${userId} (${deviceType})`);
     
+    // Use correct collection based on device type
+    const collectionName = getNotificationCollection(deviceType);
+    console.log(`Collection: ${collectionName}`);
+    
     const notifications = [];
     
     if (deviceType === 'child') {
@@ -632,83 +700,105 @@ app.post('/api/test/create-notifications', async (req, res) => {
       notifications.push({
         userId: userId,
         title: '📱 New App Limit Set',
+        body: 'Your parent has set a 60-minute limit on TikTok',
         message: 'Your parent has set a 60-minute limit on TikTok',
-        type: 'info',
+        type: 'limit_set',
         read: false,
-        timestamp: admin.firestore.FieldValue.serverTimestamp()
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        priority: 'normal'
       });
       
       notifications.push({
         userId: userId,
         title: '🔒 App Blocked',
+        body: 'Instagram has been blocked by your parent',
         message: 'Instagram has been blocked by your parent',
-        type: 'warning',
+        type: 'app_blocked',
         read: false,
-        timestamp: admin.firestore.FieldValue.serverTimestamp()
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        priority: 'high'
       });
       
       notifications.push({
         userId: userId,
         title: '✅ Task Assigned',
+        body: 'New task: Clean your room',
         message: 'New task: Clean your room',
-        type: 'success',
+        type: 'new_task',
         read: false,
-        timestamp: admin.firestore.FieldValue.serverTimestamp()
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        priority: 'normal'
       });
     } else {
       // Notifications for parent from child
       notifications.push({
         userId: userId,
         title: '🚨 SOS Alert',
+        body: 'Your child needs immediate help!',
         message: 'Your child needs immediate help!',
         type: 'sos',
         read: false,
-        timestamp: admin.firestore.FieldValue.serverTimestamp()
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        priority: 'high'
       });
       
       notifications.push({
         userId: userId,
         title: '📍 Geofence Alert',
+        body: 'Your child has left the "Home" safe zone',
         message: 'Your child has left the "Home" safe zone',
-        type: 'warning',
+        type: 'geofence_alert',
         read: false,
-        timestamp: admin.firestore.FieldValue.serverTimestamp()
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        priority: 'high'
       });
       
       notifications.push({
         userId: userId,
         title: '🔋 Low Battery',
+        body: 'Child device battery is at 15%',
         message: 'Child device battery is at 15%',
-        type: 'info',
+        type: 'battery_low',
         read: false,
-        timestamp: admin.firestore.FieldValue.serverTimestamp()
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        priority: 'normal'
       });
       
       notifications.push({
         userId: userId,
         title: '✅ Task Completed',
+        body: 'Your child completed: Finish homework',
         message: 'Your child completed: Finish homework',
-        type: 'success',
+        type: 'task_completed',
         read: false,
-        timestamp: admin.firestore.FieldValue.serverTimestamp()
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        priority: 'normal'
       });
     }
     
-    // Store all notifications
+    // Store all notifications in correct collection
     const batch = db.batch();
     notifications.forEach(notification => {
-      const notificationRef = db.collection('notifications').doc();
+      const notificationRef = db.collection(collectionName).doc();
       batch.set(notificationRef, notification);
     });
     
     await batch.commit();
     
-    console.log(`✅ Created ${notifications.length} test notifications for: ${userId}`);
+    console.log(`✅ Created ${notifications.length} test notifications in ${collectionName}`);
     
     res.json({
       success: true,
       message: `Created ${notifications.length} test notifications`,
-      count: notifications.length
+      count: notifications.length,
+      collection: collectionName
     });
   } catch (error) {
     console.error('Error creating test notifications:', error);
@@ -765,6 +855,112 @@ app.post('/api/devices/track-login', async (req, res) => {
   }
 });
 
+// Helper function to get correct notification collection
+const getNotificationCollection = (deviceType) => {
+  return deviceType === 'parent' ? 'parentNotifications' : 'childNotifications';
+};
+
+// Helper function to determine device type from userId
+const getDeviceTypeForUser = async (userId) => {
+  try {
+    const deviceDoc = await db.collection('deviceRegistrations').doc(userId).get();
+    if (deviceDoc.exists) {
+      return deviceDoc.data().deviceType || 'child';
+    }
+    return 'child'; // default
+  } catch (error) {
+    console.error('Error getting device type:', error);
+    return 'child';
+  }
+};
+
+// Helper function to send notification (stores in DB + sends FCM push)
+const sendNotificationToUser = async (targetUserId, title, body, type, data = {}, priority = 'high', fromUserId = null) => {
+  try {
+    // Determine target device type
+    const targetDeviceDoc = await db.collection('deviceRegistrations').doc(targetUserId).get();
+    if (!targetDeviceDoc.exists) {
+      throw new Error('Target user not found');
+    }
+    
+    const targetDeviceType = targetDeviceDoc.data().deviceType;
+    const collectionName = getNotificationCollection(targetDeviceType);
+    
+    // Store notification in database
+    const notificationRef = db.collection(collectionName).doc();
+    const notificationData = {
+      userId: targetUserId,
+      title: title,
+      body: body,
+      message: body, // For compatibility
+      type: type,
+      read: false,
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      data: data,
+      priority: priority
+    };
+    
+    // Add sender info if provided
+    if (fromUserId) {
+      const fromDeviceDoc = await db.collection('deviceRegistrations').doc(fromUserId).get();
+      if (fromDeviceDoc.exists) {
+        const fromDeviceType = fromDeviceDoc.data().deviceType;
+        if (fromDeviceType === 'parent') {
+          notificationData.fromParentId = fromUserId;
+        } else {
+          notificationData.fromChildId = fromUserId;
+        }
+      }
+    }
+    
+    await notificationRef.set(notificationData);
+    console.log(`✅ Notification stored in ${collectionName}: ${notificationRef.id}`);
+    
+    // Try to send FCM push notification
+    let fcmMessageId = null;
+    try {
+      const fcmToken = targetDeviceDoc.data().fcmToken;
+      
+      if (fcmToken) {
+        const message = {
+          token: fcmToken,
+          notification: {
+            title: title,
+            body: body,
+          },
+          data: {
+            notificationId: notificationRef.id,
+            type: type,
+            ...data,
+          },
+          android: {
+            priority: priority === 'high' ? 'high' : 'normal',
+            notification: {
+              sound: 'default',
+              channelId: priority === 'high' ? 'high_priority' : 'default',
+            },
+          },
+        };
+        
+        fcmMessageId = await admin.messaging().send(message);
+        console.log(`✅ FCM push notification sent: ${fcmMessageId}`);
+      }
+    } catch (fcmError) {
+      console.error(`⚠️ Failed to send FCM push notification:`, fcmError.message);
+    }
+    
+    return {
+      notificationId: notificationRef.id,
+      messageId: fcmMessageId || notificationRef.id,
+      collection: collectionName
+    };
+  } catch (error) {
+    console.error('Error in sendNotificationToUser:', error);
+    throw error;
+  }
+};
+
 // ==================== NOTIFICATION ENDPOINTS ====================
 
 // Get notifications for a user
@@ -782,8 +978,12 @@ app.get('/api/notifications/:userId', async (req, res) => {
     console.log(`Limit: ${limit}`);
     console.log(`Timestamp: ${new Date().toISOString()}`);
     
+    // Use separate collections for parent and child
+    const collectionName = deviceType === 'parent' ? 'parentNotifications' : 'childNotifications';
+    console.log(`Collection: ${collectionName}`);
+    
     // Query notifications for this user
-    const notificationsSnapshot = await db.collection('notifications')
+    const notificationsSnapshot = await db.collection(collectionName)
       .where('userId', '==', userId)
       .limit(limit)
       .get();
@@ -791,14 +991,23 @@ app.get('/api/notifications/:userId', async (req, res) => {
     const notifications = [];
     notificationsSnapshot.forEach(doc => {
       const data = doc.data();
+      
+      // Handle both old and new schema
+      const message = data.message || data.body || '';
+      const timestamp = data.timestamp || data.sentAt;
+      
       notifications.push({
         id: doc.id,
         title: data.title,
-        message: data.message,
+        message: message,
+        body: message, // Include both for compatibility
         type: data.type || 'info',
         read: data.read || false,
-        timestamp: data.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(),
-        userId: data.userId
+        timestamp: timestamp?.toDate?.()?.toISOString() || new Date().toISOString(),
+        userId: data.userId,
+        data: data.data || {},
+        fromParentId: data.fromParentId,
+        fromChildId: data.fromChildId
       });
     });
     
@@ -809,11 +1018,12 @@ app.get('/api/notifications/:userId', async (req, res) => {
     if (notifications.length > 0) {
       console.log(`   Latest notification:`);
       console.log(`      - Title: ${notifications[0].title}`);
+      console.log(`      - Message: ${notifications[0].message}`);
       console.log(`      - Type: ${notifications[0].type}`);
       console.log(`      - Read: ${notifications[0].read}`);
       console.log(`      - Time: ${notifications[0].timestamp}`);
     } else {
-      console.log(`   💡 No notifications found for this user`);
+      console.log(`   💡 No notifications found in ${collectionName}`);
       console.log(`   💡 Use test endpoint to create sample notifications:`);
       console.log(`      POST /api/test/create-notifications`);
       console.log(`      Body: { "userId": "${userId}", "deviceType": "${deviceType}" }`);
@@ -840,27 +1050,33 @@ app.get('/api/notifications/:userId', async (req, res) => {
 app.get('/api/notifications/:userId/unread-count', async (req, res) => {
   try {
     const { userId } = req.params;
+    const deviceType = req.query.deviceType || 'parent';
     
-    console.log(`🔔 Fetching unread count for user: ${userId}`);
+    console.log(`🔔 Fetching unread count for user: ${userId} (${deviceType})`);
     
-    const notificationsSnapshot = await db.collection('notifications')
+    // Use separate collections
+    const collectionName = deviceType === 'parent' ? 'parentNotifications' : 'childNotifications';
+    
+    const notificationsSnapshot = await db.collection(collectionName)
       .where('userId', '==', userId)
       .where('read', '==', false)
       .get();
     
     const count = notificationsSnapshot.size;
     
-    console.log(`✅ Unread notifications: ${count}`);
+    console.log(`✅ Unread notifications in ${collectionName}: ${count}`);
     
     res.json({
       success: true,
-      count
+      count,
+      unreadCount: count // Include both for compatibility
     });
   } catch (error) {
     console.error('Error fetching unread count:', error);
     res.json({
       success: true,
-      count: 0
+      count: 0,
+      unreadCount: 0
     });
   }
 });
@@ -869,10 +1085,14 @@ app.get('/api/notifications/:userId/unread-count', async (req, res) => {
 app.put('/api/notifications/:notificationId/read', async (req, res) => {
   try {
     const { notificationId } = req.params;
+    const { userId, deviceType } = req.body;
     
-    console.log(`✓ Marking notification as read: ${notificationId}`);
+    console.log(`✓ Marking notification as read: ${notificationId} (${deviceType})`);
     
-    const notificationRef = db.collection('notifications').doc(notificationId);
+    // Use separate collections
+    const collectionName = deviceType === 'parent' ? 'parentNotifications' : 'childNotifications';
+    
+    const notificationRef = db.collection(collectionName).doc(notificationId);
     const notificationDoc = await notificationRef.get();
     
     if (!notificationDoc.exists) {
@@ -884,7 +1104,7 @@ app.put('/api/notifications/:notificationId/read', async (req, res) => {
       readAt: admin.firestore.FieldValue.serverTimestamp()
     });
     
-    console.log(`✅ Notification marked as read: ${notificationId}`);
+    console.log(`✅ Notification marked as read in ${collectionName}: ${notificationId}`);
     
     res.json({
       success: true,
@@ -996,44 +1216,53 @@ app.post('/api/notifications/sos', async (req, res) => {
       ? `Location: ${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`
       : 'Location not available';
 
-    const message = {
-      token: parentFcmToken,
-      notification: {
-        title: '🚨 EMERGENCY SOS ALERT',
-        body: `Your child needs immediate help! ${locationText}`,
-      },
-      data: {
-        type: 'sos',
-        childId: childId,
-        latitude: location?.latitude?.toString() || '',
-        longitude: location?.longitude?.toString() || '',
-        timestamp: new Date().toISOString(),
-      },
-      android: {
-        priority: 'high',
+    // Try to send FCM notification (optional - don't fail if this doesn't work)
+    let fcmMessageId = null;
+    try {
+      const message = {
+        token: parentFcmToken,
         notification: {
-          sound: 'default',
-          priority: 'max',
-          channelId: 'emergency',
+          title: '🚨 EMERGENCY SOS ALERT',
+          body: `Your child needs immediate help! ${locationText}`,
         },
-      },
-    };
+        data: {
+          type: 'sos',
+          childId: childId,
+          latitude: location?.latitude?.toString() || '',
+          longitude: location?.longitude?.toString() || '',
+          timestamp: new Date().toISOString(),
+        },
+        android: {
+          priority: 'high',
+          notification: {
+            sound: 'default',
+            priority: 'max',
+            channelId: 'emergency',
+          },
+        },
+      };
 
-    // Send FCM notification
-    const response = await admin.messaging().send(message);
-    console.log(`✅ SOS notification sent to parent via FCM:`, response);
+      fcmMessageId = await admin.messaging().send(message);
+      console.log(`✅ SOS notification sent to parent via FCM:`, fcmMessageId);
+    } catch (fcmError) {
+      console.log(`⚠️ FCM push notification failed (continuing anyway):`, fcmError.message);
+    }
 
-    // Store notification in database
-    const notificationRef = db.collection('notifications').doc();
+    // Store notification in database (parent notifications collection)
+    const notificationRef = db.collection('parentNotifications').doc();
     await notificationRef.set({
       userId: parentId,
       title: '🚨 EMERGENCY SOS ALERT',
+      body: `Your child needs immediate help! ${locationText}`,
       message: `Your child needs immediate help! ${locationText}`,
       type: 'sos',
       read: false,
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
       childId: childId,
+      fromChildId: childId,
       location: location || null,
+      priority: 'high'
     });
 
     console.log(`✅ SOS notification stored in database`);
@@ -1042,7 +1271,7 @@ app.post('/api/notifications/sos', async (req, res) => {
     res.json({
       success: true,
       message: 'SOS alert sent successfully',
-      messageId: response,
+      messageId: fcmMessageId || notificationRef.id,
       notificationId: notificationRef.id
     });
   } catch (error) {
@@ -1056,16 +1285,642 @@ app.post('/api/notifications/sos', async (req, res) => {
   }
 });
 
+// Send notification to a user (stores in DB and sends FCM push)
+app.post('/api/notifications/send', async (req, res) => {
+  try {
+    const { targetUserId, title, body, data, priority, deviceType } = req.body;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`📤 SENDING NOTIFICATION`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Target User: ${targetUserId}`);
+    console.log(`Title: ${title}`);
+    console.log(`Body: ${body}`);
+    console.log(`Device Type: ${deviceType || 'auto-detect'}`);
+    console.log(`Priority: ${priority || 'normal'}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+    
+    if (!targetUserId || !title || !body) {
+      console.log(`❌ Missing required fields`);
+      console.log(`${'='.repeat(60)}\n`);
+      return res.status(400).json({ error: 'Missing required fields: targetUserId, title, body' });
+    }
+    
+    // Determine collection based on deviceType or auto-detect from device registration
+    let collectionName = 'childNotifications'; // default
+    if (deviceType) {
+      collectionName = deviceType === 'parent' ? 'parentNotifications' : 'childNotifications';
+    } else {
+      // Auto-detect from device registration
+      const deviceDoc = await db.collection('deviceRegistrations').doc(targetUserId).get();
+      if (deviceDoc.exists) {
+        const deviceData = deviceDoc.data();
+        collectionName = deviceData.deviceType === 'parent' ? 'parentNotifications' : 'childNotifications';
+      }
+    }
+    
+    console.log(`Collection: ${collectionName}`);
+    
+    // Store notification in database using correct schema
+    const notificationRef = db.collection(collectionName).doc();
+    const notificationData = {
+      userId: targetUserId,
+      title: title,
+      body: body,
+      message: body,
+      type: data?.type || 'info',
+      read: false,
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      data: data || {},
+      priority: priority || 'normal'
+    };
+    
+    await notificationRef.set(notificationData);
+    console.log(`✅ Notification stored in ${collectionName}: ${notificationRef.id}`);
+    
+    // Try to send FCM push notification
+    let fcmMessageId = null;
+    try {
+      const targetDeviceDoc = await db.collection('deviceRegistrations').doc(targetUserId).get();
+      
+      if (targetDeviceDoc.exists && targetDeviceDoc.data().fcmToken) {
+        const fcmToken = targetDeviceDoc.data().fcmToken;
+        
+        const message = {
+          token: fcmToken,
+          notification: {
+            title: title,
+            body: body,
+          },
+          data: {
+            notificationId: notificationRef.id,
+            ...(data || {}),
+          },
+          android: {
+            priority: priority === 'high' ? 'high' : 'normal',
+          },
+        };
+        
+        fcmMessageId = await admin.messaging().send(message);
+        console.log(`✅ FCM push notification sent: ${fcmMessageId}`);
+      } else {
+        console.log(`⚠️ No FCM token found for user: ${targetUserId}`);
+      }
+    } catch (fcmError) {
+      console.error(`⚠️ Failed to send FCM push notification:`, fcmError.message);
+      // Continue even if FCM fails - notification is still stored in DB
+    }
+    
+    console.log(`${'='.repeat(60)}\n`);
+    
+    res.json({
+      success: true,
+      messageId: fcmMessageId || notificationRef.id,
+      notificationId: notificationRef.id,
+      collection: collectionName,
+      notification: {
+        id: notificationRef.id,
+        ...notificationData,
+        sentAt: new Date().toISOString(),
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error(`\n❌ ERROR SENDING NOTIFICATION:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Failed to send notification',
+      details: error.message
+    });
+  }
+});
+
+// Send notification from child to parent
+app.post('/api/notifications/send-to-parent', async (req, res) => {
+  try {
+    const { childId, title, body, data } = req.body;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`📤 CHILD → PARENT NOTIFICATION`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Child ID: ${childId}`);
+    console.log(`Title: ${title}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+    
+    if (!childId || !title || !body) {
+      console.log(`❌ Missing required fields`);
+      console.log(`${'='.repeat(60)}\n`);
+      return res.status(400).json({ error: 'Missing required fields: childId, title, body' });
+    }
+    
+    // Find parent linked to this child
+    const childDeviceDoc = await db.collection('deviceRegistrations').doc(childId).get();
+    
+    if (!childDeviceDoc.exists) {
+      console.log(`⚠️ Child device not found: ${childId}`);
+      console.log(`${'='.repeat(60)}\n`);
+      return res.status(404).json({ error: 'Child device not found' });
+    }
+    
+    const parentId = childDeviceDoc.data().linkedTo;
+    
+    if (!parentId) {
+      console.log(`⚠️ No parent linked to child: ${childId}`);
+      console.log(`${'='.repeat(60)}\n`);
+      return res.status(404).json({ error: 'No parent linked to this child' });
+    }
+    
+    console.log(`📱 Found parent: ${parentId}`);
+    
+    // Store notification for parent using correct schema
+    const notificationRef = db.collection('parentNotifications').doc();
+    const notificationData = {
+      userId: parentId,
+      title: title,
+      body: body,
+      message: body,
+      type: data?.type || 'info',
+      read: false,
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      fromChildId: childId,
+      data: data || {},
+      priority: 'high'
+    };
+    
+    await notificationRef.set(notificationData);
+    console.log(`✅ Notification stored for parent: ${notificationRef.id}`);
+    
+    // Try to send FCM push notification to parent
+    let fcmMessageId = null;
+    try {
+      const parentDeviceDoc = await db.collection('deviceRegistrations').doc(parentId).get();
+      
+      if (parentDeviceDoc.exists && parentDeviceDoc.data().fcmToken) {
+        const fcmToken = parentDeviceDoc.data().fcmToken;
+        
+        const message = {
+          token: fcmToken,
+          notification: {
+            title: title,
+            body: body,
+          },
+          data: {
+            notificationId: notificationRef.id,
+            fromChildId: childId,
+            ...(data || {}),
+          },
+          android: {
+            priority: 'high',
+          },
+        };
+        
+        fcmMessageId = await admin.messaging().send(message);
+        console.log(`✅ FCM push notification sent to parent: ${fcmMessageId}`);
+      } else {
+        console.log(`⚠️ No FCM token found for parent: ${parentId}`);
+      }
+    } catch (fcmError) {
+      console.error(`⚠️ Failed to send FCM push notification:`, fcmError.message);
+    }
+    
+    console.log(`${'='.repeat(60)}\n`);
+    
+    res.json({
+      success: true,
+      messageId: fcmMessageId || notificationRef.id,
+      notificationId: notificationRef.id,
+      parentId: parentId
+    });
+  } catch (error) {
+    console.error(`\n❌ ERROR SENDING NOTIFICATION TO PARENT:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Failed to send notification to parent',
+      details: error.message
+    });
+  }
+});
+
+// Notify parent about app installation
+app.post('/api/notifications/app-installed', async (req, res) => {
+  try {
+    const { childId, appName, packageName } = req.body;
+    
+    if (!childId || !appName) {
+      return res.status(400).json({ error: 'Missing required fields: childId, appName' });
+    }
+    
+    console.log(`📱 App installed notification: ${appName} on child: ${childId}`);
+    
+    // Find parent
+    const childDeviceDoc = await db.collection('deviceRegistrations').doc(childId).get();
+    if (!childDeviceDoc.exists || !childDeviceDoc.data().linkedTo) {
+      return res.status(404).json({ error: 'Parent not found' });
+    }
+    
+    const parentId = childDeviceDoc.data().linkedTo;
+    
+    // Send notification to parent
+    const result = await sendNotificationToUser(
+      parentId,
+      '📱 New App Installed',
+      `${appName} was installed on your child's device`,
+      'app_installed',
+      { appName, packageName },
+      'normal',
+      childId
+    );
+    
+    console.log(`✅ App installed notification created: ${result.notificationId}`);
+    
+    res.json({
+      success: true,
+      messageId: result.messageId,
+      notificationId: result.notificationId
+    });
+  } catch (error) {
+    console.error('Error sending app installed notification:', error);
+    res.status(500).json({
+      error: 'Failed to send app installed notification',
+      details: error.message
+    });
+  }
+});
+
+// Notify parent about low battery
+app.post('/api/notifications/battery-low', async (req, res) => {
+  try {
+    const { childId, batteryLevel } = req.body;
+    
+    if (!childId || batteryLevel === undefined) {
+      return res.status(400).json({ error: 'Missing required fields: childId, batteryLevel' });
+    }
+    
+    console.log(`🔋 Low battery notification: ${batteryLevel}% on child: ${childId}`);
+    
+    // Find parent
+    const childDeviceDoc = await db.collection('deviceRegistrations').doc(childId).get();
+    if (!childDeviceDoc.exists || !childDeviceDoc.data().linkedTo) {
+      return res.status(404).json({ error: 'Parent not found' });
+    }
+    
+    const parentId = childDeviceDoc.data().linkedTo;
+    
+    // Send notification to parent
+    const result = await sendNotificationToUser(
+      parentId,
+      '🔋 Low Battery Alert',
+      `Child's device battery is at ${batteryLevel}%`,
+      'battery_low',
+      { batteryLevel },
+      'high',
+      childId
+    );
+    
+    console.log(`✅ Low battery notification created: ${result.notificationId}`);
+    
+    res.json({
+      success: true,
+      messageId: result.messageId,
+      notificationId: result.notificationId
+    });
+  } catch (error) {
+    console.error('Error sending battery low notification:', error);
+    res.status(500).json({
+      error: 'Failed to send battery low notification',
+      details: error.message
+    });
+  }
+});
+
+// Notify child about limit set by parent
+app.post('/api/notifications/limit-set', async (req, res) => {
+  try {
+    const { childId, parentId, limitType, limitValue } = req.body;
+    
+    if (!childId || !parentId || !limitType || limitValue === undefined) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    console.log(`⏱️ Limit set notification: ${limitType} = ${limitValue} for child: ${childId}`);
+    
+    // Send notification to child
+    const result = await sendNotificationToUser(
+      childId,
+      '⏱️ New Limit Set',
+      `Your parent set a ${limitType} limit: ${limitValue}`,
+      'limit_set',
+      { limitType, limitValue },
+      'normal',
+      parentId
+    );
+    
+    console.log(`✅ Limit set notification created: ${result.notificationId}`);
+    
+    res.json({
+      success: true,
+      messageId: result.messageId,
+      notificationId: result.notificationId
+    });
+  } catch (error) {
+    console.error('Error sending limit set notification:', error);
+    res.status(500).json({
+      error: 'Failed to send limit set notification',
+      details: error.message
+    });
+  }
+});
+
+// Notify child about app being blocked
+app.post('/api/notifications/app-blocked', async (req, res) => {
+  try {
+    const { childId, parentId, appName } = req.body;
+    
+    if (!childId || !parentId || !appName) {
+      return res.status(400).json({ error: 'Missing required fields: childId, parentId, appName' });
+    }
+    
+    console.log(`🔒 App blocked notification: ${appName} for child: ${childId}`);
+    
+    // Send notification to child
+    const result = await sendNotificationToUser(
+      childId,
+      '🔒 App Blocked',
+      `${appName} has been blocked by your parent`,
+      'app_blocked',
+      { appName },
+      'high',
+      parentId
+    );
+    
+    console.log(`✅ App blocked notification created: ${result.notificationId}`);
+    
+    res.json({
+      success: true,
+      messageId: result.messageId,
+      notificationId: result.notificationId
+    });
+  } catch (error) {
+    console.error('Error sending app blocked notification:', error);
+    res.status(500).json({
+      error: 'Failed to send app blocked notification',
+      details: error.message
+    });
+  }
+});
+
+// Notify parent about geofence alert
+app.post('/api/notifications/geofence-alert', async (req, res) => {
+  try {
+    const { childId, alertType, location, zoneName } = req.body;
+    
+    if (!childId || !alertType) {
+      return res.status(400).json({ error: 'Missing required fields: childId, alertType' });
+    }
+    
+    console.log(`📍 Geofence alert: ${alertType} ${zoneName || 'zone'} for child: ${childId}`);
+    
+    // Find parent
+    const childDeviceDoc = await db.collection('deviceRegistrations').doc(childId).get();
+    if (!childDeviceDoc.exists || !childDeviceDoc.data().linkedTo) {
+      return res.status(404).json({ error: 'Parent not found' });
+    }
+    
+    const parentId = childDeviceDoc.data().linkedTo;
+    
+    const action = alertType === 'entered' ? 'entered' : 'left';
+    const zone = zoneName || 'a safe zone';
+    
+    // Send notification to parent
+    const result = await sendNotificationToUser(
+      parentId,
+      '📍 Geofence Alert',
+      `Your child ${action} ${zone}`,
+      'geofence_alert',
+      { alertType, location, zoneName },
+      'high',
+      childId
+    );
+    
+    console.log(`✅ Geofence alert notification created: ${result.notificationId}`);
+    
+    res.json({
+      success: true,
+      messageId: result.messageId,
+      notificationId: result.notificationId
+    });
+  } catch (error) {
+    console.error('Error sending geofence alert:', error);
+    res.status(500).json({
+      error: 'Failed to send geofence alert',
+      details: error.message
+    });
+  }
+});
+
+// Notify child about new task assigned by parent
+app.post('/api/notifications/task-assigned', async (req, res) => {
+  try {
+    const { childId, parentId, taskText } = req.body;
+    
+    if (!childId || !parentId || !taskText) {
+      return res.status(400).json({ error: 'Missing required fields: childId, parentId, taskText' });
+    }
+    
+    console.log(`✅ Task assigned notification: "${taskText}" for child: ${childId}`);
+    
+    // Send notification to child
+    const result = await sendNotificationToUser(
+      childId,
+      '✅ New Task Assigned',
+      `Your parent assigned you a task: ${taskText}`,
+      'task_assigned',
+      { taskText },
+      'normal',
+      parentId
+    );
+    
+    console.log(`✅ Task assigned notification created: ${result.notificationId}`);
+    
+    res.json({
+      success: true,
+      messageId: result.messageId,
+      notificationId: result.notificationId
+    });
+  } catch (error) {
+    console.error('Error sending task assigned notification:', error);
+    res.status(500).json({
+      error: 'Failed to send task assigned notification',
+      details: error.message
+    });
+  }
+});
+
+// Notify parent about task completed by child
+app.post('/api/notifications/task-completed', async (req, res) => {
+  try {
+    const { childId, taskText } = req.body;
+    
+    if (!childId || !taskText) {
+      return res.status(400).json({ error: 'Missing required fields: childId, taskText' });
+    }
+    
+    console.log(`✅ Task completed notification: "${taskText}" by child: ${childId}`);
+    
+    // Find parent
+    const childDeviceDoc = await db.collection('deviceRegistrations').doc(childId).get();
+    if (!childDeviceDoc.exists || !childDeviceDoc.data().linkedTo) {
+      return res.status(404).json({ error: 'Parent not found' });
+    }
+    
+    const parentId = childDeviceDoc.data().linkedTo;
+    
+    // Send notification to parent
+    const result = await sendNotificationToUser(
+      parentId,
+      '✅ Task Completed',
+      `Your child completed: ${taskText}`,
+      'task_completed',
+      { taskText },
+      'normal',
+      childId
+    );
+    
+    console.log(`✅ Task completed notification created: ${result.notificationId}`);
+    
+    res.json({
+      success: true,
+      messageId: result.messageId,
+      notificationId: result.notificationId
+    });
+  } catch (error) {
+    console.error('Error sending task completed notification:', error);
+    res.status(500).json({
+      error: 'Failed to send task completed notification',
+      details: error.message
+    });
+  }
+});
+
+// Cleanup old notifications (keep only last 30)
+app.post('/api/notifications/:userId/cleanup', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const deviceType = req.query.deviceType;
+    
+    console.log(`🧹 Cleaning up old notifications for: ${userId}`);
+    
+    // Determine collection
+    let collectionName = 'childNotifications';
+    if (deviceType) {
+      collectionName = getNotificationCollection(deviceType);
+    } else {
+      const userDeviceType = await getDeviceTypeForUser(userId);
+      collectionName = getNotificationCollection(userDeviceType);
+    }
+    
+    console.log(`   Collection: ${collectionName}`);
+    
+    // Get all notifications for user, sorted by timestamp
+    const notificationsSnapshot = await db.collection(collectionName)
+      .where('userId', '==', userId)
+      .get();
+    
+    const notifications = [];
+    notificationsSnapshot.forEach(doc => {
+      const data = doc.data();
+      const timestamp = data.timestamp || data.sentAt;
+      notifications.push({
+        id: doc.id,
+        timestamp: timestamp?.toDate?.()?.getTime() || 0
+      });
+    });
+    
+    // Sort by timestamp descending
+    notifications.sort((a, b) => b.timestamp - a.timestamp);
+    
+    // Keep only last 30, delete the rest
+    const toDelete = notifications.slice(30);
+    
+    if (toDelete.length > 0) {
+      const batch = db.batch();
+      toDelete.forEach(notification => {
+        batch.delete(db.collection(collectionName).doc(notification.id));
+      });
+      await batch.commit();
+      
+      console.log(`✅ Deleted ${toDelete.length} old notifications for: ${userId}`);
+    } else {
+      console.log(`✅ No cleanup needed for: ${userId}`);
+    }
+    
+    res.json({
+      success: true,
+      deletedCount: toDelete.length,
+      remainingCount: Math.min(notifications.length, 30)
+    });
+  } catch (error) {
+    console.error('Error cleaning up notifications:', error);
+    res.status(500).json({
+      error: 'Failed to cleanup notifications',
+      details: error.message
+    });
+  }
+});
+
+// Delete a notification
+app.delete('/api/notifications/:notificationId', async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    const deviceType = req.query.deviceType;
+    
+    console.log(`🗑️ Deleting notification: ${notificationId} (${deviceType})`);
+    
+    if (!deviceType) {
+      return res.status(400).json({ error: 'deviceType query parameter is required' });
+    }
+    
+    const collectionName = getNotificationCollection(deviceType);
+    await db.collection(collectionName).doc(notificationId).delete();
+    
+    console.log(`✅ Notification deleted from ${collectionName}: ${notificationId}`);
+    
+    res.json({
+      success: true,
+      message: 'Notification deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting notification:', error);
+    res.status(500).json({
+      error: 'Failed to delete notification',
+      details: error.message
+    });
+  }
+});
+
 // Create a notification (for testing or internal use)
 app.post('/api/notifications', async (req, res) => {
   try {
     const { userId, title, message, type } = req.body;
     
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`📬 CREATING NOTIFICATION`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`User ID: ${userId}`);
+    console.log(`Title: ${title}`);
+    console.log(`Message: ${message}`);
+    console.log(`Type: ${type || 'info'}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+    
     if (!userId || !title || !message) {
+      console.log(`❌ Missing required fields`);
+      console.log(`${'='.repeat(60)}\n`);
       return res.status(400).json({ error: 'Missing required fields: userId, title, message' });
     }
-    
-    console.log(`📬 Creating notification for user: ${userId}`);
     
     const notificationRef = db.collection('notifications').doc();
     const notificationData = {
@@ -1079,7 +1934,10 @@ app.post('/api/notifications', async (req, res) => {
     
     await notificationRef.set(notificationData);
     
-    console.log(`✅ Notification created: ${notificationRef.id}`);
+    console.log(`✅ Notification created successfully`);
+    console.log(`   ID: ${notificationRef.id}`);
+    console.log(`   Stored in: notifications/${notificationRef.id}`);
+    console.log(`${'='.repeat(60)}\n`);
     
     res.json({
       success: true,
@@ -1091,7 +1949,9 @@ app.post('/api/notifications', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error creating notification:', error);
+    console.error(`\n❌ ERROR CREATING NOTIFICATION:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
     res.status(500).json({ 
       success: false,
       error: 'Failed to create notification',
