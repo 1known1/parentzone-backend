@@ -2166,6 +2166,170 @@ app.delete('/api/device/:deviceId/tasks/:taskId', async (req, res) => {
   }
 });
 
+// ==================== REMOTE DEVICE CONTROL ENDPOINTS ====================
+
+// Remote lock child device
+app.post('/api/device/remote-lock', async (req, res) => {
+  try {
+    const { parentId, childId } = req.body;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🔒 REMOTE DEVICE LOCK REQUEST`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Parent ID: ${parentId}`);
+    console.log(`Child ID: ${childId}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+    
+    if (!parentId || !childId) {
+      console.log(`❌ Missing required fields`);
+      console.log(`${'='.repeat(60)}\n`);
+      return res.status(400).json({ error: 'Missing required fields: parentId, childId' });
+    }
+    
+    // Hardcoded parent-child relationship (skip verification for this pair)
+    const isHardcodedPair = (parentId === 'azizurgreat111@gmail.com' && childId === '1unknown.annonymous1@gmail.com');
+    
+    if (!isHardcodedPair) {
+      // Verify parent-child relationship for other users
+      const childDeviceDoc = await db.collection('deviceRegistrations').doc(childId).get();
+      
+      if (!childDeviceDoc.exists) {
+        console.log(`⚠️ Child device not found: ${childId}`);
+        console.log(`${'='.repeat(60)}\n`);
+        return res.status(404).json({ error: 'Child device not found' });
+      }
+      
+      const linkedParentId = childDeviceDoc.data().linkedTo;
+      
+      if (linkedParentId !== parentId) {
+        console.log(`⚠️ Parent ${parentId} is not linked to child ${childId}`);
+        console.log(`${'='.repeat(60)}\n`);
+        return res.status(403).json({ error: 'Not authorized to lock this device' });
+      }
+    } else {
+      console.log(`✅ Using hardcoded parent-child relationship`);
+    }
+    
+    console.log(`✅ Parent-child relationship verified`);
+    
+    // Send lock command notification to child device
+    const result = await sendNotificationToUser(
+      childId,
+      '🔒 Device Locked',
+      'Your device has been remotely locked by your parent',
+      'device_lock',
+      { 
+        action: 'lock',
+        parentId: parentId,
+        timestamp: new Date().toISOString()
+      },
+      'high',
+      parentId
+    );
+    
+    console.log(`✅ Lock command sent to child device`);
+    console.log(`   Notification ID: ${result.notificationId}`);
+    console.log(`   FCM Message ID: ${result.messageId}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+    res.json({
+      success: true,
+      message: 'Device lock command sent successfully',
+      notificationId: result.notificationId,
+      messageId: result.messageId
+    });
+  } catch (error) {
+    console.error(`\n❌ ERROR SENDING REMOTE LOCK COMMAND:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Failed to send remote lock command',
+      details: error.message
+    });
+  }
+});
+
+// Remote unlock child device
+app.post('/api/device/remote-unlock', async (req, res) => {
+  try {
+    const { parentId, childId } = req.body;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🔓 REMOTE DEVICE UNLOCK REQUEST`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Parent ID: ${parentId}`);
+    console.log(`Child ID: ${childId}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+    
+    if (!parentId || !childId) {
+      console.log(`❌ Missing required fields`);
+      console.log(`${'='.repeat(60)}\n`);
+      return res.status(400).json({ error: 'Missing required fields: parentId, childId' });
+    }
+    
+    // Hardcoded parent-child relationship (skip verification for this pair)
+    const isHardcodedPair = (parentId === 'azizurgreat111@gmail.com' && childId === '1unknown.annonymous1@gmail.com');
+    
+    if (!isHardcodedPair) {
+      // Verify parent-child relationship for other users
+      const childDeviceDoc = await db.collection('deviceRegistrations').doc(childId).get();
+      
+      if (!childDeviceDoc.exists) {
+        console.log(`⚠️ Child device not found: ${childId}`);
+        console.log(`${'='.repeat(60)}\n`);
+        return res.status(404).json({ error: 'Child device not found' });
+      }
+      
+      const linkedParentId = childDeviceDoc.data().linkedTo;
+      
+      if (linkedParentId !== parentId) {
+        console.log(`⚠️ Parent ${parentId} is not linked to child ${childId}`);
+        console.log(`${'='.repeat(60)}\n`);
+        return res.status(403).json({ error: 'Not authorized to unlock this device' });
+      }
+    } else {
+      console.log(`✅ Using hardcoded parent-child relationship`);
+    }
+    
+    console.log(`✅ Parent-child relationship verified`);
+    
+    // Send unlock command notification to child device
+    const result = await sendNotificationToUser(
+      childId,
+      '🔓 Device Unlocked',
+      'Your device has been remotely unlocked by your parent',
+      'device_unlock',
+      { 
+        action: 'unlock',
+        parentId: parentId,
+        timestamp: new Date().toISOString()
+      },
+      'high',
+      parentId
+    );
+    
+    console.log(`✅ Unlock command sent to child device`);
+    console.log(`   Notification ID: ${result.notificationId}`);
+    console.log(`   FCM Message ID: ${result.messageId}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+    res.json({
+      success: true,
+      message: 'Device unlock command sent successfully',
+      notificationId: result.notificationId,
+      messageId: result.messageId
+    });
+  } catch (error) {
+    console.error(`\n❌ ERROR SENDING REMOTE UNLOCK COMMAND:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Failed to send remote unlock command',
+      details: error.message
+    });
+  }
+});
+
 // Load devices and families from Firestore on startup
 loadDevicesFromFirestore();
 
