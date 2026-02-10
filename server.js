@@ -923,17 +923,26 @@ const sendNotificationToUser = async (targetUserId, title, body, type, data = {}
       const fcmToken = targetDeviceDoc.data().fcmToken;
       
       if (fcmToken) {
+        // Convert all data fields to strings for FCM compatibility
+        const fcmData = {
+          notificationId: notificationRef.id,
+          type: type,
+          userId: targetUserId,
+          priority: priority,
+        };
+        
+        // Add all custom data fields as strings
+        Object.keys(data).forEach(key => {
+          fcmData[key] = typeof data[key] === 'string' ? data[key] : JSON.stringify(data[key]);
+        });
+        
         const message = {
           token: fcmToken,
           notification: {
             title: title,
             body: body,
           },
-          data: {
-            notificationId: notificationRef.id,
-            type: type,
-            ...data,
-          },
+          data: fcmData,
           android: {
             priority: priority === 'high' ? 'high' : 'normal',
             notification: {
@@ -945,9 +954,12 @@ const sendNotificationToUser = async (targetUserId, title, body, type, data = {}
         
         fcmMessageId = await admin.messaging().send(message);
         console.log(`✅ FCM push notification sent: ${fcmMessageId}`);
+      } else {
+        console.log(`⚠️ No FCM token found for user: ${targetUserId}`);
       }
     } catch (fcmError) {
       console.error(`⚠️ Failed to send FCM push notification:`, fcmError.message);
+      console.error(`   Error details:`, fcmError);
     }
     
     return {
@@ -1347,18 +1359,32 @@ app.post('/api/notifications/send', async (req, res) => {
       if (targetDeviceDoc.exists && targetDeviceDoc.data().fcmToken) {
         const fcmToken = targetDeviceDoc.data().fcmToken;
         
+        // Convert all data fields to strings for FCM compatibility
+        const fcmData = {
+          notificationId: notificationRef.id,
+          type: data?.type || 'info',
+        };
+        
+        // Add all custom data fields as strings
+        if (data) {
+          Object.keys(data).forEach(key => {
+            fcmData[key] = typeof data[key] === 'string' ? data[key] : JSON.stringify(data[key]);
+          });
+        }
+        
         const message = {
           token: fcmToken,
           notification: {
             title: title,
             body: body,
           },
-          data: {
-            notificationId: notificationRef.id,
-            ...(data || {}),
-          },
+          data: fcmData,
           android: {
             priority: priority === 'high' ? 'high' : 'normal',
+            notification: {
+              sound: 'default',
+              channelId: priority === 'high' ? 'high_priority' : 'default',
+            },
           },
         };
         
