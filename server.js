@@ -716,198 +716,209 @@ app.post('/api/device/:deviceId/screen-time-limit', async (req, res) => {
   }
 });
 
-// ==================== SETTED LIMIT COLLECTION ENDPOINTS ====================
+// ==================== APP USAGE LIMITS COLLECTION ENDPOINTS ====================
 
-// Create or update app limit in settedLimit collection
-app.post('/api/device/:deviceId/setted-limits', async (req, res) => {
+// Set or update app limits for a child device (Parent side)
+// Structure: appUsageLimits/<childDeviceId> -> { apps: { packageName: limitMinutes }, updatedAt }
+app.post('/api/device/:deviceId/app-usage-limits', async (req, res) => {
   try {
     const { deviceId } = req.params;
-    const { appName, packageName, limitMinutes, isBlocked, lastUpdated } = req.body;
+    const { packageName, limitMinutes } = req.body;
     
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`📝 CREATING/UPDATING SETTED LIMIT`);
+    console.log(`📝 SETTING APP USAGE LIMIT`);
     console.log(`${'='.repeat(60)}`);
     console.log(`Device ID: ${deviceId}`);
-    console.log(`App Name: ${appName}`);
     console.log(`Package Name: ${packageName}`);
     console.log(`Limit: ${limitMinutes} minutes`);
-    console.log(`Is Blocked: ${isBlocked}`);
     console.log(`Timestamp: ${new Date().toISOString()}`);
 
-    if (!deviceId || !appName || !packageName || limitMinutes === undefined) {
+    if (!deviceId || !packageName) {
       console.log(`❌ Missing required fields`);
       console.log(`${'='.repeat(60)}\n`);
-      return res.status(400).json({ error: 'Missing required fields: deviceId, appName, packageName, limitMinutes' });
+      return res.status(400).json({ error: 'Missing required fields: deviceId, packageName' });
     }
 
-    // Create or update the limit in settedLimit collection
-    const limitData = {
-      deviceId,
-      appName,
-      packageName,
-      limitMinutes,
-      isBlocked: isBlocked || false,
-      lastUpdated: lastUpdated || new Date().toISOString(),
+    // Get existing document or create new one
+    const limitsRef = db.collection('appUsageLimits').doc(deviceId);
+    const limitsDoc = await limitsRef.get();
+    
+    let apps = {};
+    if (limitsDoc.exists) {
+      apps = limitsDoc.data().apps || {};
+    }
+
+    // Update or remove the app limit
+    if (limitMinutes === null || limitMinutes === undefined || limitMinutes <= 0) {
+      // Remove limit
+      delete apps[packageName];
+      console.log(`🗑️ Removing limit for ${packageName}`);
+    } else {
+      // Set limit
+      apps[packageName] = limitMinutes;
+      console.log(`✅ Setting limit for ${packageName}: ${limitMinutes} minutes`);
+    }
+
+    // Save to Firestore
+    await limitsRef.set({
+      apps: apps,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    };
+    });
 
-    // Use packageName as document ID for easy lookup
-    await db.collection('settedLimit')
-      .doc(deviceId)
-      .collection('apps')
-      .doc(packageName)
-      .set(limitData, { merge: true });
-
-    console.log(`✅ Setted limit saved successfully`);
+    console.log(`✅ App usage limits updated successfully`);
+    console.log(`   Total apps with limits: ${Object.keys(apps).length}`);
     console.log(`${'='.repeat(60)}\n`);
 
     res.json({
       success: true,
-      message: 'App limit set successfully',
+      message: 'App usage limit updated successfully',
       deviceId,
-      appName,
       packageName,
-      limitMinutes,
-      isBlocked: limitData.isBlocked
+      limitMinutes: limitMinutes || null,
+      totalAppsWithLimits: Object.keys(apps).length
     });
   } catch (error) {
-    console.error(`\n❌ ERROR SETTING APP LIMIT:`);
+    console.error(`\n❌ ERROR SETTING APP USAGE LIMIT:`);
     console.error(error);
     console.log(`${'='.repeat(60)}\n`);
     res.status(500).json({
-      error: 'Failed to set app limit',
+      error: 'Failed to set app usage limit',
       details: error.message
     });
   }
 });
 
-// Get all app limits from settedLimit collection for a device
-app.get('/api/device/:deviceId/setted-limits', async (req, res) => {
+// Get all app usage limits for a child device (Child side)
+app.get('/api/device/:deviceId/app-usage-limits', async (req, res) => {
   try {
     const { deviceId } = req.params;
     
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`📥 FETCHING SETTED LIMITS`);
+    console.log(`📥 FETCHING APP USAGE LIMITS`);
     console.log(`${'='.repeat(60)}`);
     console.log(`Device ID: ${deviceId}`);
     console.log(`Timestamp: ${new Date().toISOString()}`);
 
-    const limitsSnapshot = await db.collection('settedLimit')
-      .doc(deviceId)
-      .collection('apps')
-      .get();
+    const limitsDoc = await db.collection('appUsageLimits').doc(deviceId).get();
 
-    const limits = [];
-    limitsSnapshot.forEach(doc => {
-      limits.push({
-        packageName: doc.id,
-        ...doc.data()
-      });
-    });
-
-    console.log(`✅ Found ${limits.length} setted limits`);
-    console.log(`${'='.repeat(60)}\n`);
-
-    res.json({
-      success: true,
-      limits,
-      count: limits.length
-    });
-  } catch (error) {
-    console.error(`\n❌ ERROR FETCHING SETTED LIMITS:`);
-    console.error(error);
-    console.log(`${'='.repeat(60)}\n`);
-    res.status(500).json({
-      error: 'Failed to fetch setted limits',
-      details: error.message
-    });
-  }
-});
-
-// Update block status for an app in settedLimit collection
-app.put('/api/device/:deviceId/setted-limits/:packageName/block', async (req, res) => {
-  try {
-    const { deviceId, packageName } = req.params;
-    const { isBlocked } = req.body;
-    
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`🔒 UPDATING BLOCK STATUS`);
-    console.log(`${'='.repeat(60)}`);
-    console.log(`Device ID: ${deviceId}`);
-    console.log(`Package Name: ${packageName}`);
-    console.log(`Is Blocked: ${isBlocked}`);
-    console.log(`Timestamp: ${new Date().toISOString()}`);
-
-    if (isBlocked === undefined) {
-      console.log(`❌ Missing isBlocked field`);
+    if (!limitsDoc.exists) {
+      console.log(`⚠️ No limits found for device: ${deviceId}`);
+      console.log(`   Returning empty limits (all apps allowed)`);
       console.log(`${'='.repeat(60)}\n`);
-      return res.status(400).json({ error: 'Missing isBlocked field' });
+      
+      return res.json({
+        success: true,
+        apps: {},
+        updatedAt: null,
+        message: 'No limits set - all apps allowed'
+      });
     }
 
-    await db.collection('settedLimit')
-      .doc(deviceId)
-      .collection('apps')
-      .doc(packageName)
-      .update({
-        isBlocked,
-        lastUpdated: new Date().toISOString(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-
-    console.log(`✅ Block status updated successfully`);
+    const data = limitsDoc.data();
+    const apps = data.apps || {};
+    
+    console.log(`✅ Found limits for ${Object.keys(apps).length} apps`);
+    console.log(`   Apps with limits:`, Object.keys(apps).join(', '));
     console.log(`${'='.repeat(60)}\n`);
 
     res.json({
       success: true,
-      message: 'Block status updated successfully',
-      deviceId,
-      packageName,
-      isBlocked
+      apps: apps,
+      updatedAt: data.updatedAt?.toDate?.()?.toISOString() || null
     });
   } catch (error) {
-    console.error(`\n❌ ERROR UPDATING BLOCK STATUS:`);
+    console.error(`\n❌ ERROR FETCHING APP USAGE LIMITS:`);
     console.error(error);
     console.log(`${'='.repeat(60)}\n`);
     res.status(500).json({
-      error: 'Failed to update block status',
+      error: 'Failed to fetch app usage limits',
       details: error.message
     });
   }
 });
 
-// Delete app limit from settedLimit collection
-app.delete('/api/device/:deviceId/setted-limits/:packageName', async (req, res) => {
+// Batch update multiple app limits at once (Parent side)
+app.post('/api/device/:deviceId/app-usage-limits/batch', async (req, res) => {
   try {
-    const { deviceId, packageName } = req.params;
+    const { deviceId } = req.params;
+    const { apps } = req.body; // apps should be an object: { packageName: limitMinutes, ... }
     
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`🗑️ DELETING SETTED LIMIT`);
+    console.log(`📝 BATCH UPDATING APP USAGE LIMITS`);
     console.log(`${'='.repeat(60)}`);
     console.log(`Device ID: ${deviceId}`);
-    console.log(`Package Name: ${packageName}`);
+    console.log(`Apps to update: ${Object.keys(apps || {}).length}`);
     console.log(`Timestamp: ${new Date().toISOString()}`);
 
-    await db.collection('settedLimit')
-      .doc(deviceId)
-      .collection('apps')
-      .doc(packageName)
-      .delete();
+    if (!deviceId || !apps || typeof apps !== 'object') {
+      console.log(`❌ Missing or invalid apps object`);
+      console.log(`${'='.repeat(60)}\n`);
+      return res.status(400).json({ error: 'Missing or invalid apps object' });
+    }
 
-    console.log(`✅ Setted limit deleted successfully`);
+    // Filter out null/undefined/zero values
+    const filteredApps = {};
+    Object.keys(apps).forEach(packageName => {
+      const limit = apps[packageName];
+      if (limit !== null && limit !== undefined && limit > 0) {
+        filteredApps[packageName] = limit;
+      }
+    });
+
+    // Save to Firestore
+    await db.collection('appUsageLimits').doc(deviceId).set({
+      apps: filteredApps,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    console.log(`✅ Batch update successful`);
+    console.log(`   Total apps with limits: ${Object.keys(filteredApps).length}`);
     console.log(`${'='.repeat(60)}\n`);
 
     res.json({
       success: true,
-      message: 'App limit removed successfully',
+      message: 'App usage limits updated successfully',
       deviceId,
-      packageName
+      totalAppsWithLimits: Object.keys(filteredApps).length
     });
   } catch (error) {
-    console.error(`\n❌ ERROR DELETING SETTED LIMIT:`);
+    console.error(`\n❌ ERROR BATCH UPDATING APP USAGE LIMITS:`);
     console.error(error);
     console.log(`${'='.repeat(60)}\n`);
     res.status(500).json({
-      error: 'Failed to delete app limit',
+      error: 'Failed to batch update app usage limits',
+      details: error.message
+    });
+  }
+});
+
+// Delete all app limits for a device (Parent side - reset all limits)
+app.delete('/api/device/:deviceId/app-usage-limits', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🗑️ DELETING ALL APP USAGE LIMITS`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Device ID: ${deviceId}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+
+    await db.collection('appUsageLimits').doc(deviceId).delete();
+
+    console.log(`✅ All app usage limits deleted`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    res.json({
+      success: true,
+      message: 'All app usage limits removed',
+      deviceId
+    });
+  } catch (error) {
+    console.error(`\n❌ ERROR DELETING APP USAGE LIMITS:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Failed to delete app usage limits',
       details: error.message
     });
   }
