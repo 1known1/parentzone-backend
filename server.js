@@ -11,6 +11,7 @@ const allowedOrigins = [
   'https://parentzone.onrender.com',
   'https://parentzone-frontend.onrender.com',
   'http://localhost:3000',
+  'http://localhost:3001',
   'http://localhost:5173',
   'http://localhost:5174'
 ];
@@ -478,6 +479,229 @@ app.post('/api/devices/link', async (req, res) => {
     console.log(`${'='.repeat(60)}\n`);
     res.status(500).json({
       error: 'Failed to link devices',
+      details: error.message
+    });
+  }
+});
+
+// Update app limit for child device
+app.post('/api/device/:deviceId/app-limit', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const { appName, limit, packageName } = req.body;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`📱 UPDATING APP LIMIT`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Device ID: ${deviceId}`);
+    console.log(`App Name: ${appName}`);
+    console.log(`Package Name: ${packageName || 'Not provided'}`);
+    console.log(`New Limit: ${limit !== null ? limit + ' minutes' : 'No limit'}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+
+    if (!deviceId || !appName) {
+      console.log(`❌ Missing required fields`);
+      console.log(`${'='.repeat(60)}\n`);
+      return res.status(400).json({ error: 'Missing deviceId or appName' });
+    }
+
+    // Get current device data
+    const deviceDoc = await db.collection('devices').doc(deviceId).get();
+    
+    // Get today's date for daily reset tracking
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    if (!deviceDoc.exists) {
+      console.log(`⚠️ Device not found, creating new entry`);
+      // Create new device entry with app limit
+      await db.collection('devices').doc(deviceId).set({
+        apps: [{
+          name: appName,
+          packageName: packageName || '',
+          limit: limit,
+          usage: 0,
+          blocked: false,
+          lastResetDate: today,
+          status: 'active',
+          timePeriod: 'daily'
+        }],
+        lastSynced: admin.firestore.FieldValue.serverTimestamp()
+      });
+    } else {
+      // Update existing device data
+      const deviceData = deviceDoc.data();
+      const apps = deviceData.apps || [];
+      
+      // Find and update the app, or add it if not found
+      const appIndex = apps.findIndex(app => app.name === appName);
+      
+      if (appIndex >= 0) {
+        // Update existing app - preserve usage if same day, reset if new day
+        const existingApp = apps[appIndex];
+        const shouldResetUsage = existingApp.lastResetDate !== today;
+        
+        apps[appIndex] = {
+          ...existingApp,
+          limit: limit,
+          usage: shouldResetUsage ? 0 : existingApp.usage,
+          blocked: shouldResetUsage ? false : (limit !== null && existingApp.usage >= limit),
+          lastResetDate: today,
+          status: 'active',
+          timePeriod: 'daily',
+          packageName: packageName || existingApp.packageName || ''
+        };
+        console.log(`✅ Updated existing app: ${appName} (usage ${shouldResetUsage ? 'reset' : 'preserved'})`);
+      } else {
+        // Add new app with limit
+        apps.push({
+          name: appName,
+          packageName: packageName || '',
+          limit: limit,
+          usage: 0,
+          blocked: false,
+          lastResetDate: today,
+          status: 'active',
+          timePeriod: 'daily'
+        });
+        console.log(`✅ Added new app: ${appName}`);
+      }
+      
+      // Save updated apps array
+      await db.collection('devices').doc(deviceId).set({
+        apps: apps,
+        lastSynced: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    }
+
+    // Send notification to child device about limit update
+    try {
+      const childDeviceDoc = await db.collection('deviceRegistrations').doc(deviceId).get();
+      if (childDeviceDoc.exists) {
+        const limitText = limit !== null ? `${limit} minutes per day` : 'removed';
+        await sendNotificationToUser(
+          deviceId,
+          '📱 App Limit Updated',
+          `${appName} limit has been set to ${limitText}`,
+          'app_limit_updated',
+          { appName, limit, packageName: packageName || '' },
+          'high'
+        );
+        console.log(`✅ Notification sent to child device`);
+      }
+    } catch (notifError) {
+      console.warn(`⚠️ Could not send notification:`, notifError.message);
+    }
+
+    console.log(`✅ App limit updated successfully`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    res.json({
+      success: true,
+      message: 'App limit updated successfully',
+      deviceId,
+      appName,
+      limit,
+      timePeriod: 'daily',
+      status: 'active'
+    });
+  } catch (error) {
+    console.error(`\n❌ ERROR UPDATING APP LIMIT:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Failed to update app limit',
+      details: error.message
+    });
+  }
+});
+
+// Update total screen time limit for child device
+app.post('/api/device/:deviceId/screen-time-limit', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const { limit } = req.body;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`⏱️ UPDATING SCREEN TIME LIMIT`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Device ID: ${deviceId}`);
+    console.log(`New Limit: ${limit !== null ? limit + ' minutes' : 'No limit'}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+
+    if (!deviceId) {
+      console.log(`❌ Missing deviceId`);
+      console.log(`${'='.repeat(60)}\n`);
+      return res.status(400).json({ error: 'Missing deviceId' });
+    }
+
+    // Get today's date for daily reset tracking
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+
+    // Get current device data to check if we need to reset
+    const deviceDoc = await db.collection('devices').doc(deviceId).get();
+    let currentUsage = 0;
+    
+    if (deviceDoc.exists) {
+      const deviceData = deviceDoc.data();
+      const lastResetDate = deviceData.screenTime?.lastResetDate;
+      
+      // Reset usage if it's a new day
+      if (lastResetDate !== today) {
+        console.log(`📅 New day detected, resetting screen time usage`);
+        currentUsage = 0;
+      } else {
+        currentUsage = deviceData.screenTime?.totalMinutes || 0;
+      }
+    }
+
+    // Update device data with new screen time limit
+    await db.collection('devices').doc(deviceId).set({
+      screenTime: {
+        limit: limit,
+        totalMinutes: currentUsage,
+        lastResetDate: today,
+        status: 'active',
+        timePeriod: 'daily'
+      },
+      lastSynced: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    // Send notification to child device
+    try {
+      const childDeviceDoc = await db.collection('deviceRegistrations').doc(deviceId).get();
+      if (childDeviceDoc.exists) {
+        const limitText = limit !== null ? `${limit} minutes per day` : 'removed';
+        await sendNotificationToUser(
+          deviceId,
+          '⏱️ Screen Time Limit Updated',
+          `Total screen time limit has been set to ${limitText}`,
+          'screen_time_limit_updated',
+          { limit },
+          'high'
+        );
+        console.log(`✅ Notification sent to child device`);
+      }
+    } catch (notifError) {
+      console.warn(`⚠️ Could not send notification:`, notifError.message);
+    }
+
+    console.log(`✅ Screen time limit updated successfully`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    res.json({
+      success: true,
+      message: 'Screen time limit updated successfully',
+      deviceId,
+      limit,
+      timePeriod: 'daily',
+      status: 'active'
+    });
+  } catch (error) {
+    console.error(`\n❌ ERROR UPDATING SCREEN TIME LIMIT:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Failed to update screen time limit',
       details: error.message
     });
   }
@@ -989,20 +1213,48 @@ app.get('/api/notifications/:userId', async (req, res) => {
     console.log(`Device Type: ${deviceType}`);
     console.log(`Limit: ${limit}`);
     console.log(`Timestamp: ${new Date().toISOString()}`);
+    console.log(`Query params:`, req.query);
     
     // Use separate collections for parent and child
     const collectionName = deviceType === 'parent' ? 'parentNotifications' : 'childNotifications';
     console.log(`Collection: ${collectionName}`);
+    console.log(`Query: db.collection('${collectionName}').where('userId', '==', '${userId}')`);
     
-    // Query notifications for this user
-    const notificationsSnapshot = await db.collection(collectionName)
-      .where('userId', '==', userId)
-      .limit(limit)
-      .get();
+    let notificationsSnapshot;
+    
+    try {
+      // Try with orderBy first (requires Firestore index)
+      console.log('Attempting query with orderBy...');
+      notificationsSnapshot = await db.collection(collectionName)
+        .where('userId', '==', userId)
+        .orderBy('timestamp', 'desc')
+        .limit(limit)
+        .get();
+      console.log(`✅ Query with orderBy succeeded, found ${notificationsSnapshot.size} documents`);
+    } catch (indexError) {
+      // If index doesn't exist, fetch without orderBy and sort in memory
+      console.log('⚠️ Firestore index not found, fetching without orderBy');
+      console.log('Index error:', indexError.message);
+      notificationsSnapshot = await db.collection(collectionName)
+        .where('userId', '==', userId)
+        .get();
+      console.log(`✅ Query without orderBy succeeded, found ${notificationsSnapshot.size} documents`);
+    }
+    
+    console.log(`\n📊 RAW FIRESTORE RESULTS:`);
+    console.log(`   Total documents: ${notificationsSnapshot.size}`);
     
     const notifications = [];
-    notificationsSnapshot.forEach(doc => {
+    notificationsSnapshot.forEach((doc, index) => {
       const data = doc.data();
+      
+      console.log(`\n   Document ${index + 1}:`);
+      console.log(`      ID: ${doc.id}`);
+      console.log(`      userId: ${data.userId}`);
+      console.log(`      title: ${data.title}`);
+      console.log(`      type: ${data.type}`);
+      console.log(`      read: ${data.read}`);
+      console.log(`      timestamp: ${data.timestamp?.toDate?.()?.toISOString() || data.sentAt?.toDate?.()?.toISOString() || 'N/A'}`);
       
       // Handle both old and new schema
       const message = data.message || data.body || '';
@@ -1023,37 +1275,45 @@ app.get('/api/notifications/:userId', async (req, res) => {
       });
     });
     
-    // Sort in memory instead of in query
+    // Sort in memory (in case we didn't use orderBy)
     notifications.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     
-    console.log(`\n✅ FOUND ${notifications.length} NOTIFICATIONS`);
-    if (notifications.length > 0) {
-      console.log(`   Latest notification:`);
-      console.log(`      - Title: ${notifications[0].title}`);
-      console.log(`      - Message: ${notifications[0].message}`);
-      console.log(`      - Type: ${notifications[0].type}`);
-      console.log(`      - Read: ${notifications[0].read}`);
-      console.log(`      - Time: ${notifications[0].timestamp}`);
+    // Apply limit if we fetched all
+    const limitedNotifications = notifications.slice(0, limit);
+    
+    console.log(`\n✅ RETURNING ${limitedNotifications.length} NOTIFICATIONS TO CLIENT`);
+    if (limitedNotifications.length > 0) {
+      console.log(`   First notification:`);
+      console.log(`      - Title: ${limitedNotifications[0].title}`);
+      console.log(`      - Message: ${limitedNotifications[0].message}`);
+      console.log(`      - Type: ${limitedNotifications[0].type}`);
+      console.log(`      - Read: ${limitedNotifications[0].read}`);
+      console.log(`      - Time: ${limitedNotifications[0].timestamp}`);
     } else {
-      console.log(`   💡 No notifications found in ${collectionName}`);
-      console.log(`   💡 Use test endpoint to create sample notifications:`);
-      console.log(`      POST /api/test/create-notifications`);
-      console.log(`      Body: { "userId": "${userId}", "deviceType": "${deviceType}" }`);
+      console.log(`   ❌ NO NOTIFICATIONS FOUND!`);
+      console.log(`   💡 Possible issues:`);
+      console.log(`      1. Wrong collection: ${collectionName}`);
+      console.log(`      2. Wrong userId: ${userId}`);
+      console.log(`      3. Notifications don't have userId field`);
+      console.log(`   💡 Debug:`);
+      console.log(`      GET /api/debug/notifications/${userId}?deviceType=${deviceType}`);
     }
     console.log(`${'='.repeat(60)}\n`);
     
     res.json({
       success: true,
-      notifications
+      notifications: limitedNotifications
     });
   } catch (error) {
     console.error(`\n❌ ERROR FETCHING NOTIFICATIONS:`);
     console.error(error);
     console.log(`${'='.repeat(60)}\n`);
+    
     // Return empty array instead of error to prevent frontend crashes
     res.json({
       success: true,
-      notifications: []
+      notifications: [],
+      error: error.message
     });
   }
 });
@@ -1561,7 +1821,7 @@ app.post('/api/notifications/app-installed', async (req, res) => {
       childId
     );
     
-    console.log(`✅ App installed notification created: ${result.notificationId}`);
+    console.log(`✅ App installed notification sent to parent`);
     
     res.json({
       success: true,
@@ -1571,7 +1831,53 @@ app.post('/api/notifications/app-installed', async (req, res) => {
   } catch (error) {
     console.error('Error sending app installed notification:', error);
     res.status(500).json({
-      error: 'Failed to send app installed notification',
+      error: 'Failed to send notification',
+      details: error.message
+    });
+  }
+});
+
+// Notify parent when child exceeds app usage limit
+app.post('/api/notifications/app-limit-exceeded', async (req, res) => {
+  try {
+    const { childId, appName, usage, limit } = req.body;
+    
+    if (!childId || !appName) {
+      return res.status(400).json({ error: 'Missing required fields: childId, appName' });
+    }
+    
+    console.log(`⚠️ App limit exceeded: ${appName} on child: ${childId} (${usage}/${limit} min)`);
+    
+    // Find parent
+    const childDeviceDoc = await db.collection('deviceRegistrations').doc(childId).get();
+    if (!childDeviceDoc.exists || !childDeviceDoc.data().linkedTo) {
+      return res.status(404).json({ error: 'Parent not found' });
+    }
+    
+    const parentId = childDeviceDoc.data().linkedTo;
+    
+    // Send notification to parent
+    const result = await sendNotificationToUser(
+      parentId,
+      '⏱️ App Limit Reached',
+      `${appName} has reached its ${limit} minute daily limit`,
+      'app_limit_exceeded',
+      { appName, usage, limit },
+      'normal',
+      childId
+    );
+    
+    console.log(`✅ App limit exceeded notification sent to parent`);
+    
+    res.json({
+      success: true,
+      messageId: result.messageId,
+      notificationId: result.notificationId
+    });
+  } catch (error) {
+    console.error('Error sending app limit exceeded notification:', error);
+    res.status(500).json({
+      error: 'Failed to send notification',
       details: error.message
     });
   }
