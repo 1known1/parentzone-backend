@@ -13,7 +13,9 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:5173',
-  'http://localhost:5174'
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://localhost:8080'
 ];
 
 app.use(cors({
@@ -333,6 +335,10 @@ app.post('/api/device/sync', async (req, res) => {
       console.log(`      - Sample: ${JSON.stringify(data.callLogs[0])}`);
     }
     console.log(`   📱 Apps: ${data.apps?.length || 0} entries`);
+    if (data.apps?.length > 0) {
+      console.log(`      - Sample app: ${JSON.stringify(data.apps[0])}`);
+      console.log(`      - Apps with usage > 0: ${data.apps.filter(a => a.usage > 0).length}`);
+    }
     console.log(`   📸 Screenshots: ${data.screenshots?.length || 0} entries`);
     console.log(`   ⏱️ App Usage: ${data.appUsage?.length || 0} entries`);
 
@@ -536,21 +542,24 @@ app.post('/api/device/:deviceId/app-limit', async (req, res) => {
       const appIndex = apps.findIndex(app => app.name === appName);
       
       if (appIndex >= 0) {
-        // Update existing app - preserve usage if same day, reset if new day
+        // Update existing app - PRESERVE USAGE, only update limit
         const existingApp = apps[appIndex];
         const shouldResetUsage = existingApp.lastResetDate !== today;
+        
+        // Keep the current usage from the existing app data
+        const currentUsage = shouldResetUsage ? 0 : (existingApp.usage || 0);
         
         apps[appIndex] = {
           ...existingApp,
           limit: limit,
-          usage: shouldResetUsage ? 0 : existingApp.usage,
-          blocked: shouldResetUsage ? false : (limit !== null && existingApp.usage >= limit),
+          usage: currentUsage,  // Preserve current usage
+          blocked: shouldResetUsage ? false : (limit !== null && currentUsage >= limit),
           lastResetDate: today,
           status: 'active',
           timePeriod: 'daily',
           packageName: packageName || existingApp.packageName || ''
         };
-        console.log(`✅ Updated existing app: ${appName} (usage ${shouldResetUsage ? 'reset' : 'preserved'})`);
+        console.log(`✅ Updated existing app: ${appName} (usage preserved: ${currentUsage} min)`);
       } else {
         // Add new app with limit
         apps.push({
