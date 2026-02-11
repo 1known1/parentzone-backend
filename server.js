@@ -716,6 +716,203 @@ app.post('/api/device/:deviceId/screen-time-limit', async (req, res) => {
   }
 });
 
+// ==================== SETTED LIMIT COLLECTION ENDPOINTS ====================
+
+// Create or update app limit in settedLimit collection
+app.post('/api/device/:deviceId/setted-limits', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const { appName, packageName, limitMinutes, isBlocked, lastUpdated } = req.body;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`📝 CREATING/UPDATING SETTED LIMIT`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Device ID: ${deviceId}`);
+    console.log(`App Name: ${appName}`);
+    console.log(`Package Name: ${packageName}`);
+    console.log(`Limit: ${limitMinutes} minutes`);
+    console.log(`Is Blocked: ${isBlocked}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+
+    if (!deviceId || !appName || !packageName || limitMinutes === undefined) {
+      console.log(`❌ Missing required fields`);
+      console.log(`${'='.repeat(60)}\n`);
+      return res.status(400).json({ error: 'Missing required fields: deviceId, appName, packageName, limitMinutes' });
+    }
+
+    // Create or update the limit in settedLimit collection
+    const limitData = {
+      deviceId,
+      appName,
+      packageName,
+      limitMinutes,
+      isBlocked: isBlocked || false,
+      lastUpdated: lastUpdated || new Date().toISOString(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    // Use packageName as document ID for easy lookup
+    await db.collection('settedLimit')
+      .doc(deviceId)
+      .collection('apps')
+      .doc(packageName)
+      .set(limitData, { merge: true });
+
+    console.log(`✅ Setted limit saved successfully`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    res.json({
+      success: true,
+      message: 'App limit set successfully',
+      deviceId,
+      appName,
+      packageName,
+      limitMinutes,
+      isBlocked: limitData.isBlocked
+    });
+  } catch (error) {
+    console.error(`\n❌ ERROR SETTING APP LIMIT:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Failed to set app limit',
+      details: error.message
+    });
+  }
+});
+
+// Get all app limits from settedLimit collection for a device
+app.get('/api/device/:deviceId/setted-limits', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`📥 FETCHING SETTED LIMITS`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Device ID: ${deviceId}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+
+    const limitsSnapshot = await db.collection('settedLimit')
+      .doc(deviceId)
+      .collection('apps')
+      .get();
+
+    const limits = [];
+    limitsSnapshot.forEach(doc => {
+      limits.push({
+        packageName: doc.id,
+        ...doc.data()
+      });
+    });
+
+    console.log(`✅ Found ${limits.length} setted limits`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    res.json({
+      success: true,
+      limits,
+      count: limits.length
+    });
+  } catch (error) {
+    console.error(`\n❌ ERROR FETCHING SETTED LIMITS:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Failed to fetch setted limits',
+      details: error.message
+    });
+  }
+});
+
+// Update block status for an app in settedLimit collection
+app.put('/api/device/:deviceId/setted-limits/:packageName/block', async (req, res) => {
+  try {
+    const { deviceId, packageName } = req.params;
+    const { isBlocked } = req.body;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🔒 UPDATING BLOCK STATUS`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Device ID: ${deviceId}`);
+    console.log(`Package Name: ${packageName}`);
+    console.log(`Is Blocked: ${isBlocked}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+
+    if (isBlocked === undefined) {
+      console.log(`❌ Missing isBlocked field`);
+      console.log(`${'='.repeat(60)}\n`);
+      return res.status(400).json({ error: 'Missing isBlocked field' });
+    }
+
+    await db.collection('settedLimit')
+      .doc(deviceId)
+      .collection('apps')
+      .doc(packageName)
+      .update({
+        isBlocked,
+        lastUpdated: new Date().toISOString(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+    console.log(`✅ Block status updated successfully`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    res.json({
+      success: true,
+      message: 'Block status updated successfully',
+      deviceId,
+      packageName,
+      isBlocked
+    });
+  } catch (error) {
+    console.error(`\n❌ ERROR UPDATING BLOCK STATUS:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Failed to update block status',
+      details: error.message
+    });
+  }
+});
+
+// Delete app limit from settedLimit collection
+app.delete('/api/device/:deviceId/setted-limits/:packageName', async (req, res) => {
+  try {
+    const { deviceId, packageName } = req.params;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🗑️ DELETING SETTED LIMIT`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Device ID: ${deviceId}`);
+    console.log(`Package Name: ${packageName}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+
+    await db.collection('settedLimit')
+      .doc(deviceId)
+      .collection('apps')
+      .doc(packageName)
+      .delete();
+
+    console.log(`✅ Setted limit deleted successfully`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    res.json({
+      success: true,
+      message: 'App limit removed successfully',
+      deviceId,
+      packageName
+    });
+  } catch (error) {
+    console.error(`\n❌ ERROR DELETING SETTED LIMIT:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Failed to delete app limit',
+      details: error.message
+    });
+  }
+});
+
 // ==================== TEST/DEBUG ENDPOINTS ====================
 
 // Test endpoint to populate mock child device data
