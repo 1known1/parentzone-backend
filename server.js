@@ -342,13 +342,28 @@ app.post('/api/device/sync', async (req, res) => {
     console.log(`   📸 Screenshots: ${data.screenshots?.length || 0} entries`);
     console.log(`   ⏱️ App Usage: ${data.appUsage?.length || 0} entries`);
 
-    await db.collection('devices').doc(deviceId).set({
+    // IMPORTANT: Store app data WITHOUT limits
+    // Limits are stored separately in appUsageLimits collection
+    // This prevents child sync from overwriting parent-set limits
+    const syncData = {
       ...data,
       lastSynced: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
+    };
+
+    // Remove 'limit' field from apps array to prevent overwriting parent-set limits
+    if (syncData.apps && Array.isArray(syncData.apps)) {
+      syncData.apps = syncData.apps.map(app => {
+        const { limit, ...appWithoutLimit } = app;
+        return appWithoutLimit; // Only store name, packageName, icon, usage, blocked
+      });
+      console.log(`   ✅ Removed 'limit' field from ${syncData.apps.length} apps (limits stored separately)`);
+    }
+
+    await db.collection('devices').doc(deviceId).set(syncData, { merge: true });
 
     console.log(`\n✅ DATA SUCCESSFULLY STORED IN FIRESTORE`);
     console.log(`   Collection: devices/${deviceId}`);
+    console.log(`   Note: App limits are stored separately in appUsageLimits collection`);
     console.log(`${'='.repeat(60)}\n`);
 
     res.json({
@@ -406,6 +421,43 @@ app.get('/api/device/:deviceId/data', async (req, res) => {
     }
 
     const deviceData = deviceDoc.data();
+    
+    // Fetch app limits from appUsageLimits collection and merge with usage data
+    try {
+      const limitsDoc = await db.collection('appUsageLimits').doc(deviceId).get();
+      
+      if (limitsDoc.exists && deviceData.apps && Array.isArray(deviceData.apps)) {
+        const limitsData = limitsDoc.data();
+        const limitsMap = limitsData.apps || {};
+        
+        console.log(`\n📊 MERGING APP LIMITS WITH USAGE DATA`);
+        console.log(`   Apps with usage data: ${deviceData.apps.length}`);
+        console.log(`   Apps with limits: ${Object.keys(limitsMap).length}`);
+        
+        // Merge limits into app data
+        deviceData.apps = deviceData.apps.map(app => {
+          const limit = limitsMap[app.packageName] || null;
+          return {
+            ...app,
+            limit: limit // Add limit from appUsageLimits collection
+          };
+        });
+        
+        console.log(`   ✅ Merged limits into app data`);
+      } else {
+        console.log(`   ℹ️ No limits found - all apps have limit: null`);
+        // Ensure all apps have limit: null if no limits are set
+        if (deviceData.apps && Array.isArray(deviceData.apps)) {
+          deviceData.apps = deviceData.apps.map(app => ({
+            ...app,
+            limit: null
+          }));
+        }
+      }
+    } catch (limitsError) {
+      console.warn(`   ⚠️ Could not fetch limits:`, limitsError.message);
+      // Continue without limits - all apps will have limit: null
+    }
     
     console.log(`\n✅ DATA FOUND IN FIRESTORE`);
     console.log(`   Device Name: ${deviceData.deviceName || 'N/A'}`);
