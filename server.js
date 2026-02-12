@@ -357,8 +357,13 @@ app.post('/api/device/sync', async (req, res) => {
         return appWithoutLimit; // Only store name, packageName, icon, usage, blocked
       });
       console.log(`   ✅ Removed 'limit' field from ${syncData.apps.length} apps (limits stored separately)`);
+      console.log(`   📊 Apps structure: ARRAY with ${syncData.apps.length} items`);
+      console.log(`   📝 Sample app:`, syncData.apps[0]);
     }
 
+    // CRITICAL: Ensure apps is stored as an ARRAY, not a map
+    // Firebase should store: apps: [{name, packageName, icon, usage, blocked}, ...]
+    // NOT: apps: {packageName: version}
     await db.collection('devices').doc(deviceId).set(syncData, { merge: true });
 
     console.log(`\n✅ DATA SUCCESSFULLY STORED IN FIRESTORE`);
@@ -977,6 +982,116 @@ app.delete('/api/device/:deviceId/app-usage-limits', async (req, res) => {
 });
 
 // ==================== TEST/DEBUG ENDPOINTS ====================
+
+// Fix apps data structure - convert from map to array
+app.post('/api/test/fix-apps-structure/:deviceId', async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🔧 FIXING APPS DATA STRUCTURE`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Device ID: ${deviceId}`);
+    
+    const deviceDoc = await db.collection('devices').doc(deviceId).get();
+    
+    if (!deviceDoc.exists) {
+      console.log(`❌ Device not found: ${deviceId}`);
+      return res.status(404).json({ error: 'Device not found' });
+    }
+    
+    const deviceData = deviceDoc.data();
+    const apps = deviceData.apps;
+    
+    console.log(`\n📊 CURRENT APPS STRUCTURE:`);
+    console.log(`   Type: ${Array.isArray(apps) ? 'ARRAY ✓' : 'MAP/OBJECT ✗'}`);
+    console.log(`   Data:`, JSON.stringify(apps).substring(0, 200));
+    
+    // Check if apps is a map/object (wrong format)
+    if (apps && !Array.isArray(apps) && typeof apps === 'object') {
+      console.log(`\n🔄 CONVERTING MAP TO ARRAY...`);
+      
+      // Convert map to array
+      const appsArray = Object.keys(apps).map(packageName => {
+        const value = apps[packageName];
+        
+        // If value is just a number (version), create proper app object
+        if (typeof value === 'number') {
+          return {
+            name: packageName.split('.').pop() || packageName, // Extract app name from package
+            packageName: packageName,
+            icon: null,
+            usage: 0,
+            blocked: false
+          };
+        }
+        
+        // If value is already an object, use it
+        return {
+          name: value.name || packageName.split('.').pop() || packageName,
+          packageName: packageName,
+          icon: value.icon || null,
+          usage: value.usage || 0,
+          blocked: value.blocked || false
+        };
+      });
+      
+      console.log(`   ✅ Converted ${appsArray.length} apps from map to array`);
+      console.log(`   📝 Sample converted app:`, appsArray[0]);
+      
+      // Update Firestore with correct structure
+      await db.collection('devices').doc(deviceId).update({
+        apps: appsArray,
+        lastSynced: admin.firestore.FieldValue.serverTimestamp()
+      });
+      
+      console.log(`\n✅ APPS STRUCTURE FIXED!`);
+      console.log(`   Old: MAP/OBJECT`);
+      console.log(`   New: ARRAY with ${appsArray.length} items`);
+      console.log(`${'='.repeat(60)}\n`);
+      
+      return res.json({
+        success: true,
+        message: 'Apps structure fixed',
+        deviceId,
+        oldStructure: 'map',
+        newStructure: 'array',
+        appsCount: appsArray.length,
+        sampleApp: appsArray[0]
+      });
+    } else if (Array.isArray(apps)) {
+      console.log(`\n✅ APPS STRUCTURE IS ALREADY CORRECT (ARRAY)`);
+      console.log(`   Apps count: ${apps.length}`);
+      console.log(`${'='.repeat(60)}\n`);
+      
+      return res.json({
+        success: true,
+        message: 'Apps structure is already correct',
+        deviceId,
+        structure: 'array',
+        appsCount: apps.length
+      });
+    } else {
+      console.log(`\n⚠️ APPS DATA IS MISSING OR INVALID`);
+      console.log(`${'='.repeat(60)}\n`);
+      
+      return res.json({
+        success: false,
+        message: 'Apps data is missing or invalid',
+        deviceId,
+        appsData: apps
+      });
+    }
+  } catch (error) {
+    console.error(`\n❌ ERROR FIXING APPS STRUCTURE:`);
+    console.error(error);
+    console.log(`${'='.repeat(60)}\n`);
+    res.status(500).json({
+      error: 'Failed to fix apps structure',
+      details: error.message
+    });
+  }
+});
 
 // Test endpoint to populate mock child device data
 app.post('/api/test/populate-child-data', async (req, res) => {
