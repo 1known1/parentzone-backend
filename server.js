@@ -809,7 +809,7 @@ app.post('/api/device/:deviceId/app-usage-limits', async (req, res) => {
     if (limitMinutes === null || limitMinutes === undefined || limitMinutes <= 0) {
       // Remove limit
       delete apps[packageName];
-      console.log(`🗑️ Removing limit for ${packageName}`);
+      console.log(`🗑️ Removing limit for ${packageName} (limit was ${limitMinutes})`);
     } else {
       // Set limit
       apps[packageName] = limitMinutes;
